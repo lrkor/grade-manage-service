@@ -2,14 +2,13 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
 from sqlalchemy import desc
 
 from common.tool import generate_uuid
 from db.db import Database, get_db_session
 from model.db_model import DbStudent, DbTbClass
 from model.response import APIResponse
-from model.student_model import CreatStudentModel
+from model.student_model import CreatStudentModel, StudentGradeResponse
 
 router = APIRouter(
     prefix="/student",
@@ -19,16 +18,6 @@ router = APIRouter(
 
 database = Database()
 engine = database.get_db_connection()
-
-
-class StudentGradeResponse(BaseModel):
-    id: str
-    name: str
-    class_name: str
-    class_id: str
-
-    class Config:
-        from_attributes = True
 
 
 @router.get("", response_model=APIResponse)

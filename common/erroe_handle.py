@@ -12,7 +12,7 @@ app = FastAPI()
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(
         status_code=exc.status_code,
-        content=ErrorResponse(code=exc.status_code, message=exc.detail).dict()
+        content=ErrorResponse(code=exc.status_code, message=exc.detail).model_dump()
     )
 
 
@@ -20,7 +20,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
         status_code=400,
-        content=ErrorResponse(code=400, message="Validation Error", detail=exc.errors()).dict()
+        content=ErrorResponse(code=400, message="Validation Error", detail=exc.errors()).model_dump()
     )
 
 
@@ -28,5 +28,5 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
-        content=ErrorResponse(code=500, message="Internal Server Error", detail=str(exc)).dict()
+        content=ErrorResponse(code=500, message="Internal Server Error", detail=str(exc)).model_dump()
     )

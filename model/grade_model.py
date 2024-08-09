@@ -11,19 +11,26 @@ class StudentSchema(BaseModel):
         from_attributes = True
 
 
-class CreatStudentModel(BaseModel):
+class CreatGradeModel(BaseModel):
     name: str
     class_id: str
+    year: str
+    semester: str
+    exam: str
+    score: float
 
     class Config:
         from_attributes = True
 
 
-class StudentGradeResponse(BaseModel):
+class GradeResponse(BaseModel):
     id: str
-    name: str
+    student_name: str
+    year: str
+    semester: int
+    exam: int
     class_name: str
-    class_id: str
+    score: float
 
     class Config:
         from_attributes = True
