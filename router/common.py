@@ -19,7 +19,7 @@ if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
 
-@router.post("/upload-file/")
+@router.post("/upload-file")
 async def upload_file(file: UploadFile = File(...)):
     # 生成唯一的文件 ID
     file_id = str(generate_uuid())

@@ -1,4 +1,5 @@
 import os
+from collections import defaultdict
 from datetime import datetime
 from typing import Optional
 
@@ -10,7 +11,8 @@ from sqlalchemy import desc
 from common.tool import generate_uuid
 from db.db import Database, get_db_session
 from model.db_model import DbStudent, DbTbClass, DbGrade
-from model.grade_model import GradeResponse, CreatGradeModel
+from model.grade_model import GradeResponse, CreatGradeModel, ImportGradeModel, StudentGradeModel, \
+    StudentGradeCompareModel
 from model.response import APIResponse
 
 router = APIRouter(
@@ -54,7 +56,8 @@ async def get_grades(
                 DbGrade.exam.label('exam'),
                 DbGrade.date.label('date'),
                 DbStudent.name.label('student_name'),
-                DbTbClass.name.label('class_name')
+                DbTbClass.name.label('class_name'),
+                DbTbClass.id.label('class_id')
             )
             .join(DbStudent, DbGrade.student_id == DbStudent.id)
             .join(DbTbClass, DbGrade.class_id == DbTbClass.id)
@@ -88,7 +91,8 @@ async def get_grades(
                 exam=row.exam,
                 date=row.date,
                 student_name=row.student_name,
-                class_name=row.class_name
+                class_name=row.class_name,
+                class_id=row.class_id
             )
             for row in results
         ]
@@ -161,6 +165,7 @@ async def delete_grade(grade_id: str):
             code=200
         )
     except Exception as e:
+        session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -187,19 +192,13 @@ async def update_grade(grade_id: str, grade: CreatGradeModel):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/import-grades/")
-async def import_grades(
-        file_id: str,
-        class_id: str,
-        year: str,
-        semester: str,
-        exam: str,
-):
+@router.post("/import-grades", response_model=APIResponse)
+async def import_grades(gradeImp: ImportGradeModel):
     session = get_db_session(engine)
     # 找到上传的文件
     file_name = None
     for f in os.listdir('./file'):
-        if f.startswith(file_id):
+        if f.startswith(gradeImp.file_id):
             file_name = os.path.join('./file', f)
             break
 
@@ -217,30 +216,163 @@ async def import_grades(
         raise HTTPException(status_code=400,
                             detail="Excel file format incorrect. Required columns: 'student_name', 'score'")
 
-    # 遍历文件内容，导入成绩
-    for index, row in df.iterrows():
-        student_name = str(row['姓名'])
-        score = row['成绩']
+    try:
+        # 遍历文件内容，导入成绩
+        for index, row in df.iterrows():
+            student_name = str(row['姓名'])
+            score = row['成绩']
 
-        student = session.query(DbStudent).filter(DbStudent.name == student_name).first()
-        student_id = ''
-        if not student:
-            db_student = DbStudent(id=generate_uuid(), name=student_name, class_id=class_id,
-                                   created_time=datetime.now())
-            session.add(db_student)
-            student_id = db_student.id
+            student = session.query(DbStudent).filter(DbStudent.name == student_name).first()
+            student_id = ''
+            if not student:
+                db_student = DbStudent(id=generate_uuid(), name=student_name, class_id=gradeImp.class_id,
+                                       created_time=datetime.now())
+                session.add(db_student)
+                student_id = db_student.id
 
-        grade = DbGrade(
-            id=generate_uuid(),
-            student_id=student.id if student else student_id,
-            class_id=class_id,
-            score=score,
-            year=year,
-            semester=semester,
-            exam=exam,
-            date=datetime.now()
+            grade = DbGrade(
+                id=generate_uuid(),
+                student_id=student.id if student else student_id,
+                class_id=gradeImp.class_id,
+                score=score,
+                year=gradeImp.year,
+                semester=gradeImp.semester,
+                exam=gradeImp.exam,
+                date=datetime.now()
+            )
+            session.add(grade)
+
+        session.commit()
+        return APIResponse(
+            status=True,
+            data={},
+            message="Success",
+            code=200
         )
-        session.add(grade)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    session.commit()
-    return {"message": "Grades imported successfully"}
+
+@router.get('/get-student-grades/{student_id}/{year}/{semester}', response_model=APIResponse)
+async def get_student_grades(student_id: str, year: str, semester: str):
+    session = get_db_session(engine)
+    try:
+        query = session.query(DbGrade).filter(
+            DbGrade.student_id == student_id,
+            DbGrade.year == year,
+            DbGrade.semester == semester
+        )
+
+        # 查询结果
+        results = query.all()
+        data = [
+            StudentGradeModel(
+                score=grade.score,
+                exam=grade.exam,
+            )
+            for grade in results
+        ]
+
+        data_len = len(data)
+        if data_len != 4:
+            for i in range(4 - data_len):
+                data.append(
+                    StudentGradeModel(
+                        score=None,
+                        exam=str(data_len + i + 1),
+                    ))
+
+        return APIResponse(
+            status=True,
+            data=data,
+            message="Success",
+            code=200
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get('/get-student-compare-grades/{student_id}/{year}/{semester}')
+async def get_student_compare_grades(student_id: str, year: str, semester: str):
+    session = get_db_session(engine)
+    try:
+        # 初始化结构体来存储四次考试的成绩
+        exam_results = defaultdict(lambda: {
+            "current_score": None,
+            "previous_score": None,
+            "exam": None
+        })
+
+        if semester == '1':
+            prev_semester = '2'
+            prev_year = str(int(year) - 1)
+        else:
+            prev_year = year
+            prev_semester = '1'
+
+        # 获取当前学期的成绩
+        current_grades = session.query(DbGrade).filter(
+            DbGrade.student_id == student_id,
+            DbGrade.year == year,
+            DbGrade.semester == semester
+        ).all()
+
+        current_data = [
+            {
+                "current_score": grade.score,
+                "exam": grade.exam
+            }
+            for grade in current_grades
+        ]
+
+        # 上一个学期成绩查询
+        previous_grades = session.query(DbGrade).filter(
+            DbGrade.student_id == student_id,
+            DbGrade.year == prev_year,
+            DbGrade.semester == prev_semester
+        )
+
+        current_data_len = len(current_data)
+        if current_data_len != 4:
+            for i in range(4 - current_data_len):
+                current_data.append({
+                    "current_score": None,
+                    "exam": str(current_data_len + i + 1)
+                })
+
+        previous_data = [
+            {
+                "previous_score": grade.score,
+                "exam": grade.exam
+            }
+            for grade in previous_grades
+        ]
+
+        previous_data_len = len(previous_data)
+        if previous_data_len != 4:
+            for i in range(4 - previous_data_len):
+                previous_data.append({
+                    "previous_score": None,
+                    "exam": str(previous_data_len + i + 1)
+                })
+
+        results = []
+        for i in range(len(current_data)):
+            results.append(
+                StudentGradeCompareModel(
+                    current_score=current_data[i]['current_score'],
+                    previous_score=previous_data[i]['previous_score'],
+                    exam=current_data[i]['exam']
+                )
+            )
+
+        return APIResponse(
+            status=True,
+            data=results,
+            message="Success",
+            code=200
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
