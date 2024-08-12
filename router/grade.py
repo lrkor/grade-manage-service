@@ -1,5 +1,4 @@
 import os
-from collections import defaultdict
 from datetime import datetime
 from typing import Optional
 
@@ -8,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import desc
 
-from common.tool import generate_uuid
+from common.tool import generate_uuid, handle_nan
 from db.db import Database, get_db_session
 from model.db_model import DbStudent, DbTbClass, DbGrade
 from model.grade_model import GradeResponse, CreatGradeModel, ImportGradeModel, StudentGradeModel, \
@@ -234,7 +233,7 @@ async def import_grades(gradeImp: ImportGradeModel):
                 id=generate_uuid(),
                 student_id=student.id if student else student_id,
                 class_id=gradeImp.class_id,
-                score=score,
+                score=handle_nan(score),
                 year=gradeImp.year,
                 semester=gradeImp.semester,
                 exam=gradeImp.exam,
@@ -274,17 +273,22 @@ async def get_student_grades(student_id: str, year: str, semester: str):
         ]
 
         data_len = len(data)
+        res = []
+        for i in range(4):
+            res.append(StudentGradeModel(
+                score=None,
+                exam=str(i + 1)
+            ))
+
         if data_len != 4:
-            for i in range(4 - data_len):
-                data.append(
-                    StudentGradeModel(
-                        score=None,
-                        exam=str(data_len + i + 1),
-                    ))
+            for item in res:
+                for item1 in data:
+                    if item.exam == item1.exam:
+                        item.score = item1.score
 
         return APIResponse(
             status=True,
-            data=data,
+            data=res,
             message="Success",
             code=200
         )
@@ -297,13 +301,6 @@ async def get_student_grades(student_id: str, year: str, semester: str):
 async def get_student_compare_grades(student_id: str, year: str, semester: str):
     session = get_db_session(engine)
     try:
-        # 初始化结构体来存储四次考试的成绩
-        exam_results = defaultdict(lambda: {
-            "current_score": None,
-            "previous_score": None,
-            "exam": None
-        })
-
         if semester == '1':
             prev_semester = '2'
             prev_year = str(int(year) - 1)
@@ -319,10 +316,10 @@ async def get_student_compare_grades(student_id: str, year: str, semester: str):
         ).all()
 
         current_data = [
-            {
-                "current_score": grade.score,
-                "exam": grade.exam
-            }
+            StudentGradeModel(
+                score=grade.score,
+                exam=grade.exam
+            )
             for grade in current_grades
         ]
 
@@ -334,42 +331,36 @@ async def get_student_compare_grades(student_id: str, year: str, semester: str):
         )
 
         current_data_len = len(current_data)
-        if current_data_len != 4:
-            for i in range(4 - current_data_len):
-                current_data.append({
-                    "current_score": None,
-                    "exam": str(current_data_len + i + 1)
-                })
 
         previous_data = [
-            {
-                "previous_score": grade.score,
-                "exam": grade.exam
-            }
+            StudentGradeModel(
+                score=grade.score,
+                exam=grade.exam
+            )
             for grade in previous_grades
         ]
 
-        previous_data_len = len(previous_data)
-        if previous_data_len != 4:
-            for i in range(4 - previous_data_len):
-                previous_data.append({
-                    "previous_score": None,
-                    "exam": str(previous_data_len + i + 1)
-                })
+        res = []
+        for i in range(4):
+            res.append(StudentGradeCompareModel(
+                current_score=None,
+                previous_score=None,
+                exam=str(i + 1)
+            ))
 
-        results = []
-        for i in range(len(current_data)):
-            results.append(
-                StudentGradeCompareModel(
-                    current_score=current_data[i]['current_score'],
-                    previous_score=previous_data[i]['previous_score'],
-                    exam=current_data[i]['exam']
-                )
-            )
+        previous_data_len = len(previous_data)
+        if previous_data_len != 4 and current_data_len != 4:
+            for item in res:
+                for item1 in current_data:
+                    if item.exam == item1.exam:
+                        item.current_score = item1.score
+                for item2 in previous_data:
+                    if item.exam == item2.exam:
+                        item.previous_score = item2.score
 
         return APIResponse(
             status=True,
-            data=results,
+            data=res,
             message="Success",
             code=200
         )
